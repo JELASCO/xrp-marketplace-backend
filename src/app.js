@@ -1,39 +1,23 @@
 require('dotenv').config();
 const express = require('express');
 const http    = require('http');
-const helmet  = require('helmet');
 const { Pool } = require('pg');
 
 const app    = express();
 const server = http.createServer(app);
 
-// CORS — manually handle to avoid origin string bugs
+app.set('trust proxy', 1);
+
 app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  // Allow any vercel.app or railway.app origin, plus configured FRONTEND_URL
-  const allowed = [
-    process.env.FRONTEND_URL,
-    'https://xrp-marketplace-frontend.vercel.app',
-    'https://xrp-marketplace-frontend-quyqo12ls-jelascos-projects.vercel.app',
-  ].filter(Boolean);
-
-  if (!origin || allowed.includes(origin) || origin.endsWith('.vercel.app') || origin.endsWith('.railway.app')) {
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
-  } else {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-  }
-
+  const origin = req.headers.origin || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
-
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
-  }
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
 
-app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(express.json({ limit: '2mb' }));
 
 app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
@@ -62,8 +46,13 @@ async function migrate() {
   }
 }
 
-try { app.use('/api', require('./routes')); }
-catch(e) { console.warn('[Routes]', e.message); app.get('/api', (req, res) => res.json({ status: 'starting' })); }
+try {
+  app.use('/api', require('./routes'));
+  console.log('[Routes] Loaded');
+} catch(e) {
+  console.error('[Routes] Load error:', e.message);
+  app.use('/api', (req, res) => res.status(500).json({ error: 'Routes failed: ' + e.message }));
+}
 
 app.use((req, res) => res.status(404).json({ error: 'Not found' }));
 app.use((err, req, res, _next) => res.status(500).json({ error: err.message }));
