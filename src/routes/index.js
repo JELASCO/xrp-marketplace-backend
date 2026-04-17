@@ -6,7 +6,7 @@ const xummSvc   = require('../xumm/xummService');
 const { auth, requireAdmin } = require('../middleware/auth');
 const notify    = require('../notifications/socket');
 
-const limit = (max, min=15) => rateLimit({ windowMs: min*60*1000, max, standardHeaders: true, legacyHeaders: false });
+const limit = (max, min=15) => rateLimit({ windowMs: min*60*1000, max, standardHeaders: true, legacyHeaders: false, validate: { xForwardedForHeader: false } });
 
 // ── AUTH ──────────────────────────────────────────────────────
 router.post('/auth/signin',  limit(10,5), async (req,res) => { try { res.json(await xummSvc.createSignInPayload()); } catch(e) { res.status(500).json({error:e.message}); } });
