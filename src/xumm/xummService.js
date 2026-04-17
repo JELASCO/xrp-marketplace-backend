@@ -78,13 +78,28 @@ async function verifySignIn(uuid) {
 
   console.log(`[Xumm] Sign-in successful for wallet: ${result.account}`);
 
-  let user = await db.users.findByWallet(result.account);
+  let user;
+  try {
+    console.log(`[DB] Looking up wallet: ${result.account}`);
+    user = await db.users.findByWallet(result.account);
+    console.log(`[DB] findByWallet result: ${JSON.stringify(user)}`);
+  } catch(dbErr) {
+    console.error(`[DB] findByWallet error:`, dbErr.message, dbErr.stack);
+    throw new Error(`DB lookup failed: ${dbErr.message}`);
+  }
+
   if (!user) {
-    console.log(`[Xumm] Creating new user for wallet: ${result.account}`);
-    user = await db.users.create({
-      walletAddress: result.account,
-      username: `user_${result.account.slice(-6).toLowerCase()}`,
-    });
+    try {
+      console.log(`[DB] Creating new user for wallet: ${result.account}`);
+      user = await db.users.create({
+        walletAddress: result.account,
+        username: `user_${result.account.slice(-6).toLowerCase()}`,
+      });
+      console.log(`[DB] User created: ${JSON.stringify(user)}`);
+    } catch(createErr) {
+      console.error(`[DB] create error:`, createErr.message, createErr.stack);
+      throw new Error(`DB create failed: ${createErr.message}`);
+    }
   }
 
   const token = jwt.sign(
