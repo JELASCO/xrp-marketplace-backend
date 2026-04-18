@@ -48,8 +48,7 @@ async function migrate() {
 }
 
 try {
-  const routes = require('./routes');
-app.use('/api', typeof routes === 'function' ? routes : routes.default || routes.router);;return typeof r==='function'?r:r.default||r.router||Object.values(r)[0];})());
+  app.use('/api', require('./routes');return typeof r==='function'?r:r.default||r.router||Object.values(r)[0];})());
   console.log('[Routes] Loaded');
 } catch(e) {
   console.error('[Routes] Load error:', e.message);
