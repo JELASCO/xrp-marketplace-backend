@@ -2,8 +2,7 @@
   "name": "xrp-marketplace-api",
   "version": "1.0.0",
   "main": "src/app.js",
-  "engines": { "node": ">=20.0.0" },
-  "scripts": {
+    "scripts": {
     "start": "node src/app.js",
     "dev": "nodemon src/app.js"
   },
@@ -17,6 +16,7 @@
     "bcryptjs": "^2.4.3",
     "pg": "^8.11.0",    "socket.io": "^4.7.0",
     "uuid": "^9.0.0",
-    "node-fetch": "^2.7.0"
+    "node-fetch": "^2.7.0",
+    "express-rate-limit": "^6.11.2"
   }
 }
