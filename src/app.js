@@ -48,7 +48,7 @@ async function migrate() {
 }
 
 try {
-  app.use('/api', require('./routes'));
+  app.use('/api', (()=>{const r=require('./routes');return typeof r==='function'?r:r.default||r.router||Object.values(r)[0];})());
   console.log('[Routes] Loaded');
 } catch(e) {
   console.error('[Routes] Load error:', e.message);
