@@ -15,7 +15,6 @@ function auth(req, res, next) {
   try { req.user = jwt.verify(h.replace('Bearer ', ''), process.env.JWT_SECRET); next(); }
   catch { res.status(401).json({ error: 'Invalid token' }); }
 }
-
 function adminAuth(req, res, next) {
   auth(req, res, () => {
     if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
@@ -25,10 +24,8 @@ function adminAuth(req, res, next) {
 
 // Auth
 router.post('/auth/signin', async (req, res) => {
-  try {
-    const result = await xummService.createSignInPayload();
-    res.json(result);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  try { const result = await xummService.createSignInPayload(); res.json(result); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.post('/auth/verify', async (req, res) => {
@@ -40,10 +37,7 @@ router.post('/auth/verify', async (req, res) => {
     let user = await db.query('SELECT * FROM users WHERE wallet_address = $1', [walletAddress]);
     if (user.rows.length === 0) {
       const username = 'user_' + walletAddress.slice(-6).toLowerCase();
-      user = await db.query(
-        'INSERT INTO users (wallet_address, username) VALUES ($1, $2) RETURNING *',
-        [walletAddress, username]
-      );
+      user = await db.query('INSERT INTO users (wallet_address, username) VALUES ($1, $2) RETURNING *', [walletAddress, username]);
     }
     const u = user.rows[0];
     const token = jwt.sign({ id: u.id, walletAddress: u.wallet_address, role: u.role || 'user' }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
@@ -53,17 +47,17 @@ router.post('/auth/verify', async (req, res) => {
 
 router.get('/auth/me', auth, async (req, res) => {
   try {
-    const user = await db.query('SELECT id, username, wallet_address, role, bio, avatar_url, reputation_score, is_verified FROM users WHERE id = $1', [req.user.id]);
+    const user = await db.query('SELECT id, username, wallet_address, role, bio, reputation_score, is_verified FROM users WHERE id = $1', [req.user.id]);
     if (!user.rows[0]) return res.status(404).json({ error: 'User not found' });
     const u = user.rows[0];
-    res.json({ id: u.id, username: u.username, walletAddress: u.wallet_address, role: u.role || 'user', bio: u.bio, avatarUrl: u.avatar_url, reputationScore: u.reputation_score, isVerified: u.is_verified });
+    res.json({ id: u.id, username: u.username, walletAddress: u.wallet_address, role: u.role || 'user', bio: u.bio, reputationScore: u.reputation_score, isVerified: u.is_verified });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Users
 router.get('/users/:id', async (req, res) => {
   try {
-    const r = await db.query('SELECT id, username, wallet_address, bio, avatar_url, reputation_score, is_verified, created_at FROM users WHERE id = $1', [req.params.id]);
+    const r = await db.query('SELECT id, username, wallet_address, bio, reputation_score, is_verified, created_at FROM users WHERE id = $1', [req.params.id]);
     if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -71,11 +65,8 @@ router.get('/users/:id', async (req, res) => {
 
 router.patch('/users/me', auth, async (req, res) => {
   try {
-    const { username, bio, avatarUrl } = req.body;
-    const r = await db.query(
-      'UPDATE users SET username = COALESCE($1, username), bio = COALESCE($2, bio), avatar_url = COALESCE($3, avatar_url) WHERE id = $4 RETURNING *',
-      [username, bio, avatarUrl, req.user.id]
-    );
+    const { username, bio } = req.body;
+    const r = await db.query('UPDATE users SET username = COALESCE($1, username), bio = COALESCE($2, bio) WHERE id = $3 RETURNING *', [username, bio, req.user.id]);
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -84,14 +75,14 @@ router.patch('/users/me', auth, async (req, res) => {
 router.get('/listings', async (req, res) => {
   try {
     const { category, game, sort, limit = 48, offset = 0 } = req.query;
-    let q = `SELECT l.*, u.username, u.reputation_score, u.is_verified FROM listings l JOIN users u ON l.seller_id = u.id WHERE l.status = 'active'`;
+    let q = "SELECT l.*, u.username, u.reputation_score, u.is_verified FROM listings l JOIN users u ON l.seller_id = u.id WHERE l.status = 'active'";
     const params = [];
-    if (category) { params.push(category); q += ` AND l.category = $${params.length}`; }
-    if (game) { params.push(game); q += ` AND l.game = $${params.length}`; }
+    if (category) { params.push(category); q += ' AND l.category = $' + params.length; }
+    if (game) { params.push(game); q += ' AND l.game = $' + params.length; }
     const orderMap = { price_asc: 'l.price_xrp ASC', price_desc: 'l.price_xrp DESC', views: 'l.views DESC', created_at: 'l.created_at DESC' };
-    q += ` ORDER BY l.is_featured DESC, ${orderMap[sort] || 'l.created_at DESC'}`;
-    params.push(parseInt(limit)); q += ` LIMIT $${params.length}`;
-    params.push(parseInt(offset)); q += ` OFFSET $${params.length}`;
+    q += ' ORDER BY l.is_featured DESC, ' + (orderMap[sort] || 'l.created_at DESC');
+    params.push(parseInt(limit)); q += ' LIMIT $' + params.length;
+    params.push(parseInt(offset)); q += ' OFFSET $' + params.length;
     const r = await db.query(q, params);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -100,7 +91,7 @@ router.get('/listings', async (req, res) => {
 router.get('/listings/:id', async (req, res) => {
   try {
     await db.query('UPDATE listings SET views = views + 1 WHERE id = $1', [req.params.id]);
-    const r = await db.query(`SELECT l.*, u.username, u.reputation_score, u.is_verified, u.wallet_address FROM listings l JOIN users u ON l.seller_id = u.id WHERE l.id = $1`, [req.params.id]);
+    const r = await db.query('SELECT l.*, u.username, u.reputation_score, u.is_verified, u.wallet_address FROM listings l JOIN users u ON l.seller_id = u.id WHERE l.id = $1', [req.params.id]);
     if (!r.rows[0]) return res.status(404).json({ error: 'Not found' });
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -110,10 +101,8 @@ router.post('/listings', auth, async (req, res) => {
   try {
     const { title, description, category, game, priceXrp, images } = req.body;
     if (!title || !priceXrp) return res.status(400).json({ error: 'title and priceXrp required' });
-    const r = await db.query(
-      'INSERT INTO listings (seller_id, title, description, category, game, price_xrp, images) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-      [req.user.id, title, description, category, game, priceXrp, JSON.stringify(images || [])]
-    );
+    const r = await db.query('INSERT INTO listings (seller_id, title, description, category, game, price_xrp, images) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
+      [req.user.id, title, description, category, game, priceXrp, JSON.stringify(images || [])]);
     res.status(201).json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -124,10 +113,8 @@ router.patch('/listings/:id', auth, async (req, res) => {
     if (!listing.rows[0]) return res.status(404).json({ error: 'Not found' });
     if (listing.rows[0].seller_id !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
     const { title, description, price_xrp, status } = req.body;
-    const r = await db.query(
-      'UPDATE listings SET title=COALESCE($1,title), description=COALESCE($2,description), price_xrp=COALESCE($3,price_xrp), status=COALESCE($4,status) WHERE id=$5 RETURNING *',
-      [title, description, price_xrp, status, req.params.id]
-    );
+    const r = await db.query('UPDATE listings SET title=COALESCE($1,title), description=COALESCE($2,description), price_xrp=COALESCE($3,price_xrp), status=COALESCE($4,status) WHERE id=$5 RETURNING *',
+      [title, description, price_xrp, status, req.params.id]);
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -136,15 +123,13 @@ router.patch('/listings/:id', auth, async (req, res) => {
 router.post('/orders', auth, async (req, res) => {
   try {
     const { listingId } = req.body;
-    const listing = await db.query('SELECT * FROM listings WHERE id = $1 AND status = $2', [listingId, 'active']);
+    const listing = await db.query("SELECT * FROM listings WHERE id = $1 AND status = 'active'", [listingId]);
     if (!listing.rows[0]) return res.status(404).json({ error: 'Listing not found or not active' });
     const l = listing.rows[0];
     if (l.seller_id === req.user.id) return res.status(400).json({ error: 'Cannot buy your own listing' });
     const commission = parseFloat((l.price_xrp * parseFloat(process.env.COMMISSION_RATE || '0.03')).toFixed(6));
-    const order = await db.query(
-      'INSERT INTO orders (buyer_id, seller_id, listing_id, price_xrp, commission_xrp, total_xrp) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
-      [req.user.id, l.seller_id, listingId, l.price_xrp, commission, l.price_xrp]
-    );
+    const order = await db.query('INSERT INTO orders (buyer_id, seller_id, listing_id, price_xrp, commission_xrp, total_xrp) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [req.user.id, l.seller_id, listingId, l.price_xrp, commission, l.price_xrp]);
     res.status(201).json({ ...order.rows[0], listing_title: l.title });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -153,10 +138,7 @@ router.get('/orders/mine', auth, async (req, res) => {
   try {
     const role = req.query.role === 'seller' ? 'seller' : 'buyer';
     const col = role === 'buyer' ? 'o.buyer_id' : 'o.seller_id';
-    const r = await db.query(
-      `SELECT o.*, l.title as listing_title, l.images FROM orders o JOIN listings l ON o.listing_id = l.id WHERE ${col} = $1 ORDER BY o.created_at DESC`,
-      [req.user.id]
-    );
+    const r = await db.query('SELECT o.*, l.title as listing_title, l.images FROM orders o JOIN listings l ON o.listing_id = l.id WHERE ' + col + ' = $1 ORDER BY o.created_at DESC', [req.user.id]);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -171,7 +153,6 @@ router.get('/orders/:id', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Escrow - create Xumm payload for buyer to sign EscrowCreate
 router.post('/orders/:id/escrow/xumm-payload', auth, async (req, res) => {
   try {
     const order = await db.query('SELECT o.*, l.price_xrp, u.wallet_address as seller_address FROM orders o JOIN listings l ON o.listing_id = l.id JOIN users u ON o.seller_id = u.id WHERE o.id = $1', [req.params.id]);
@@ -183,18 +164,11 @@ router.post('/orders/:id/escrow/xumm-payload', auth, async (req, res) => {
     const buyerAddress = buyer.rows[0].wallet_address;
     const RIPPLE_EPOCH = 946684800;
     const cancelAfter = Math.floor(Date.now() / 1000) - RIPPLE_EPOCH + 7 * 86400;
-    const payload = await xummService.createEscrowPayload({
-      buyerAddress,
-      sellerAddress: o.seller_address,
-      xrpAmount: o.total_xrp,
-      cancelAfter,
-      orderId: o.id
-    });
+    const payload = await xummService.createEscrowPayload({ buyerAddress, sellerAddress: o.seller_address, xrpAmount: o.total_xrp, cancelAfter, orderId: o.id });
     res.json(payload);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Escrow status check
 router.get('/orders/:id/escrow/status', auth, async (req, res) => {
   try {
     const order = await db.query('SELECT o.*, u.wallet_address as buyer_address FROM orders o JOIN users u ON o.buyer_id = u.id WHERE o.id = $1', [req.params.id]);
@@ -206,7 +180,6 @@ router.get('/orders/:id/escrow/status', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Escrow confirm - create Xumm EscrowFinish payload for buyer
 router.post('/orders/:id/escrow/confirm', auth, async (req, res) => {
   try {
     const order = await db.query('SELECT o.*, u.wallet_address as buyer_address FROM orders o JOIN users u ON o.buyer_id = u.id WHERE o.id = $1', [req.params.id]);
@@ -214,36 +187,26 @@ router.post('/orders/:id/escrow/confirm', auth, async (req, res) => {
     const o = order.rows[0];
     if (o.buyer_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
     if (o.status !== 'escrow_locked' && o.status !== 'delivered') return res.status(400).json({ error: 'Cannot confirm in this state' });
-    // If no on-chain escrow (testnet / dev), just mark complete
     if (!o.escrow_sequence) {
       await db.query("UPDATE orders SET status = 'completed' WHERE id = $1", [o.id]);
       await db.query("UPDATE listings SET status = 'sold' WHERE id = $1", [o.listing_id]);
       return res.json({ status: 'completed', message: 'Order completed' });
     }
-    // Create Xumm EscrowFinish payload
-    const payload = await xummService.createEscrowFinishPayload({
-      buyerAddress: o.buyer_address,
-      escrowOwner: o.buyer_address,
-      offerSequence: o.escrow_sequence
-    });
+    const payload = await xummService.createEscrowFinishPayload({ buyerAddress: o.buyer_address, escrowOwner: o.buyer_address, offerSequence: o.escrow_sequence });
     res.json({ xumm: payload, orderId: o.id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Webhook: Xumm calls this when user signs EscrowCreate or EscrowFinish
 router.post('/orders/:id/escrow/webhook', async (req, res) => {
   try {
-    const { payloadUuid, signed, txHash, txData } = req.body;
+    const { signed, txHash, txData } = req.body;
     if (!signed) return res.json({ ok: true });
     const order = await db.query('SELECT * FROM orders WHERE id = $1', [req.params.id]);
     if (!order.rows[0]) return res.status(404).json({ error: 'Not found' });
     const o = order.rows[0];
-    const txType = txData?.TransactionType;
+    const txType = txData && txData.TransactionType;
     if (txType === 'EscrowCreate') {
-      await db.query(
-        "UPDATE orders SET status = 'escrow_locked', escrow_tx_hash = $1, escrow_sequence = $2 WHERE id = $3",
-        [txHash, txData?.Sequence, o.id]
-      );
+      await db.query("UPDATE orders SET status = 'escrow_locked', escrow_tx_hash = $1, escrow_sequence = $2 WHERE id = $3", [txHash, txData && txData.Sequence, o.id]);
     } else if (txType === 'EscrowFinish') {
       await db.query("UPDATE orders SET status = 'completed', escrow_finish_tx_hash = $1 WHERE id = $2", [txHash, o.id]);
       await db.query("UPDATE listings SET status = 'sold' WHERE id = $1", [o.listing_id]);
@@ -288,17 +251,17 @@ router.get('/admin/stats', adminAuth, async (req, res) => {
       db.query("SELECT COALESCE(SUM(commission_xrp),0) as total FROM orders WHERE status = 'completed'")
     ]);
     res.json({
-      totalUsers: parseInt(users.rows[0].count),
-      activeListings: parseInt(listings.rows[0].count),
+      totalUsers:      parseInt(users.rows[0].count),
+      activeListings:  parseInt(listings.rows[0].count),
       completedOrders: parseInt(orders.rows[0].count),
-      totalRevenue: parseFloat(revenue.rows[0].total)
+      totalRevenue:    parseFloat(revenue.rows[0].total)
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 router.get('/admin/disputes', adminAuth, async (req, res) => {
   try {
-    const r = await db.query(`SELECT d.*, o.total_xrp, ub.username as buyer_name, us.username as seller_name FROM disputes d JOIN orders o ON d.order_id = o.id JOIN users ub ON o.buyer_id = ub.id JOIN users us ON o.seller_id = us.id WHERE d.status = 'open' ORDER BY d.created_at DESC`);
+    const r = await db.query("SELECT d.*, o.total_xrp, ub.username as buyer_name, us.username as seller_name FROM disputes d JOIN orders o ON d.order_id = o.id JOIN users ub ON o.buyer_id = ub.id JOIN users us ON o.seller_id = us.id WHERE d.status = 'open' ORDER BY d.created_at DESC");
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
