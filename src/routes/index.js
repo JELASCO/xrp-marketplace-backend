@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const rateLimit = require('express-rate-limit');
+const _rateLimit = require('express-rate-limit');
+const rateLimit = _rateLimit.default || _rateLimit;
 const db = require('../db');
 const jwt = require('jsonwebtoken');
 const escrowService = require('../escrow/escrowService');
