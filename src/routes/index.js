@@ -117,7 +117,7 @@ router.post('/listings', auth, async (req, res) => {
   try {
     const { title, description, category, game, priceXrp, images } = req.body;
     if (!title || !priceXrp) return res.status(400).json({ error: 'title and priceXrp required' });
-    const r = await db.query('INSERT INTO listings (seller_id, title, description, category, game, price_xrp, images) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *', [req.user.id, title, description, category, game, priceXrp, JSON.stringify(images || [])]);
+    const r = await db.query('INSERT INTO listings (seller_id, title, description, category, game, price_xrp, images) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *', [req.user.id, title, description, category, game, priceXrp, images || []]);
     res.status(201).json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
