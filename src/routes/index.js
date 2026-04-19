@@ -82,10 +82,11 @@ router.get('/users/:id', async (req, res) => {
 router.patch('/users/me', auth, async (req, res) => {
   try {
     const { username, bio, avatar_url } = req.body;
-    const r = await db.query(
-      'UPDATE users SET username = COALESCE($1, username), bio = COALESCE($2, bio), avatar_url = COALESCE($3, avatar_url) WHERE id = $4 RETURNING *',
+    await db.query(
+      'UPDATE users SET username = COALESCE($1, username), bio = COALESCE($2, bio), avatar_url = COALESCE($3, avatar_url) WHERE id = $4::uuid',
       [username || null, bio || null, avatar_url || null, req.user.id]
     );
+    const r = await db.query('SELECT * FROM users WHERE id = $1::uuid', [req.user.id]);
     if (!r.rows[0]) return res.status(404).json({ error: 'User not found' });
     res.json(r.rows[0]);
   } catch (e) { res.status(500).json({ error: e.message }); }
