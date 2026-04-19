@@ -146,8 +146,15 @@ router.post('/orders', auth, async (req, res) => {
     if (!listing.rows[0]) return res.status(404).json({ error: 'Listing not found or not active' });
     const l = listing.rows[0];
     if (l.seller_id === req.user.id) return res.status(400).json({ error: 'Cannot buy your own listing' });
-    const commission = parseFloat((l.price_xrp * parseFloat(process.env.COMMISSION_RATE || '0.03')).toFixed(6));
-    const order = await db.query('INSERT INTO orders (buyer_id, seller_id, listing_id, price_xrp, commission_xrp, total_xrp) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *', [req.user.id, l.seller_id, listingId, l.price_xrp, commission, l.price_xrp]);
+    const commissionRate = parseFloat(process.env.COMMISSION_RATE || '0.03');
+    const commission = parseFloat((l.price_xrp * commissionRate).toFixed(6));
+    const sellerReceives = parseFloat((l.price_xrp - commission).toFixed(6));
+    const buyer = await db.query('SELECT wallet_address FROM users WHERE id = $1', [req.user.id]);
+    const seller = await db.query('SELECT wallet_address FROM users WHERE id = $1', [l.seller_id]);
+    const order = await db.query(
+      'INSERT INTO orders (buyer_id, seller_id, listing_id, buyer_wallet_address, seller_wallet_address, total_xrp, commission_rate, commission_xrp, seller_receives_xrp) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+      [req.user.id, l.seller_id, listingId, buyer.rows[0].wallet_address, seller.rows[0].wallet_address, l.price_xrp, commissionRate, commission, sellerReceives]
+    );
     res.status(201).json({ ...order.rows[0], listing_title: l.title });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
