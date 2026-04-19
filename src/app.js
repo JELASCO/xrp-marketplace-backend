@@ -9,6 +9,8 @@ app.use(helmet());
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
+app.get('/health', (req, res) => res.json({ ok: true }));
+
 app.use('/api', require('./routes'));
 
 app.use((err, req, res, next) => {
