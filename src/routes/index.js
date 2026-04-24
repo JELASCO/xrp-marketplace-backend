@@ -211,7 +211,7 @@ router.post('/orders/:id/escrow/confirm', auth, async (req, res) => {
     if (!order.rows[0]) return res.status(404).json({ error: 'Not found' });
     const o = order.rows[0];
     if (o.buyer_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
-    if (o.status !== 'escrow_locked' && o.status !== 'delivered') return res.status(400).json({ error: 'Cannot confirm in this state' });
+    if (o.status === 'completed' || o.status === 'refunded' || o.status === 'disputed') return res.status(400).json({ error: 'Order already ' + o.status });
     if (!o.escrow_sequence) {
       await db.query("UPDATE orders SET status = 'completed' WHERE id = $1", [o.id]);
       await db.query("UPDATE listings SET status = 'sold' WHERE id = $1", [o.listing_id]);
