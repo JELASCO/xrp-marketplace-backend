@@ -1,4 +1,4 @@
-{"error":"Not Found"}const express = require('express');
+const express = require('express');
 const router = express.Router();
 const _rateLimit = require('express-rate-limit');
 const rateLimit = _rateLimit.default || _rateLimit;
