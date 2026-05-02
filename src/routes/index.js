@@ -102,16 +102,17 @@ router.patch('/users/me', auth, async (req, res) => {
 // Listings
 router.get('/listings', async (req, res) => {
   try {
-    const { category, game, sort, limit = 48, offset = 0 } = req.query;
-    let q = "SELECT l.*, u.username, u.reputation_score, u.is_verified FROM listings l JOIN users u ON l.seller_id = u.id WHERE l.status = 'active'";
+    const { category, game, sort, limit = 48, offset = 0, q: search } = req.query;
+    let sql = "SELECT l.*, u.username, u.reputation_score, u.is_verified FROM listings l JOIN users u ON l.seller_id = u.id WHERE l.status = 'active'";
     const params = [];
-    if (category) { params.push(category); q += ' AND l.category = $' + params.length; }
-    if (game) { params.push(game); q += ' AND l.game = $' + params.length; }
+    if (category) { params.push(category); sql += ' AND l.category = $' + params.length; }
+    if (game) { params.push(game); sql += ' AND l.game = $' + params.length; }
+    if (search) { params.push('%' + search + '%'); sql += ' AND l.title ILIKE $' + params.length; }
     const orderMap = { price_asc: 'l.price_xrp ASC', price_desc: 'l.price_xrp DESC', views: 'l.views DESC', created_at: 'l.created_at DESC' };
-    q += ' ORDER BY l.is_featured DESC, ' + (orderMap[sort] || 'l.created_at DESC');
-    params.push(parseInt(limit)); q += ' LIMIT $' + params.length;
-    params.push(parseInt(offset)); q += ' OFFSET $' + params.length;
-    const r = await db.query(q, params);
+    sql += ' ORDER BY l.is_featured DESC, ' + (orderMap[sort] || 'l.created_at DESC');
+    params.push(parseInt(limit)); sql += ' LIMIT $' + params.length;
+    params.push(parseInt(offset)); sql += ' OFFSET $' + params.length;
+    const r = await db.query(sql, params);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -260,7 +261,7 @@ router.post('/orders/:id/dispute', auth, async (req, res) => {
     const o = order.rows[0];
     if (o.buyer_id !== req.user.id && o.seller_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
     await db.query("UPDATE orders SET status = 'disputed' WHERE id = $1", [o.id]);
-    await db.query('INSERT INTO disputes (order_id, raised_by, reason) VALUES ($1,$2,$3)', [o.id, req.user.id, reason]);
+    await db.query('INSERT INTO disputes (order_id, opened_by_id, reason) VALUES ($1,$2,$3)', [o.id, req.user.id, reason]);
     const otherParty = req.user.id === o.buyer_id ? o.seller_id : o.buyer_id;
     pushNotif(otherParty, 'dispute_opened', { orderId: o.id, reason });
     res.json({ status: 'disputed' });
@@ -274,9 +275,9 @@ router.post('/orders/:id/review', auth, async (req, res) => {
     if (!order.rows[0]) return res.status(404).json({ error: 'Not found' });
     const o = order.rows[0];
     if (o.status !== 'completed') return res.status(400).json({ error: 'Can only review completed orders' });
-    await db.query('INSERT INTO reviews (order_id, reviewer_id, seller_id, rating, comment) VALUES ($1,$2,$3,$4,$5)', [o.id, req.user.id, o.seller_id, rating, comment]);
+    await db.query('INSERT INTO reviews (order_id, reviewer_id, reviewed_id, rating, comment) VALUES ($1,$2,$3,$4,$5)', [o.id, req.user.id, o.seller_id, rating, comment]);
       pushNotif(o.seller_id, 'new_review', { orderId: o.id, rating });
-    await db.query('UPDATE users SET reputation_score = (SELECT AVG(rating) FROM reviews WHERE seller_id = $1) WHERE id = $1', [o.seller_id]);
+    await db.query('UPDATE users SET reputation_score = (SELECT AVG(rating) FROM reviews WHERE reviewed_id = $1) WHERE id = $1', [o.seller_id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -309,7 +310,7 @@ router.get('/admin/disputes', adminAuth, async (req, res) => {
 router.post('/disputes/:id/resolve', adminAuth, async (req, res) => {
   try {
     const { resolution, favorBuyer } = req.body;
-    await db.query("UPDATE disputes SET status = 'resolved', resolution = $1, resolved_by = $2 WHERE id = $3", [resolution, req.user.id, req.params.id]);
+    await db.query("UPDATE disputes SET status = 'resolved', admin_note = $1, admin_id = $2, decision = $3, resolved_at = NOW() WHERE id = $4", [resolution, req.user.id, favorBuyer ? 'refund_buyer' : 'release_seller', req.params.id]);
     const dispute = await db.query('SELECT * FROM disputes WHERE id = $1', [req.params.id]);
     const status = favorBuyer ? 'refunded' : 'completed';
     await db.query('UPDATE orders SET status = $1 WHERE id = $2', [status, dispute.rows[0].order_id]);
