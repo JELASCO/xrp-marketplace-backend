@@ -6,6 +6,13 @@ const db = require('../db');
 const jwt = require('jsonwebtoken');
 const escrowService = require('../escrow/escrowService');
 const xummService = require('../xumm/xummService');
+const { notify } = require('../notifications/socket');
+async function pushNotif(userId, type, payload) {
+  try {
+    await db.query('INSERT INTO notifications (user_id, type, payload) VALUES ($1,$2,$3)', [userId, type, JSON.stringify(payload)]);
+    notify(userId, 'notification', { type, payload, created_at: new Date().toISOString() });
+  } catch(e) { console.warn('[Notif]', e.message); }
+}
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -155,7 +162,8 @@ router.post('/orders', auth, async (req, res) => {
       'INSERT INTO orders (buyer_id, seller_id, listing_id, buyer_wallet_address, seller_wallet_address, total_xrp, commission_rate, commission_xrp, seller_receives_xrp) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
       [req.user.id, l.seller_id, listingId, buyer.rows[0].wallet_address, seller.rows[0].wallet_address, l.price_xrp, commissionRate, commission, sellerReceives]
     );
-    res.status(201).json({ ...order.rows[0], listing_title: l.title });
+    pushNotif(l.seller_id, 'new_order', { orderId: order.rows[0].id, listingTitle: l.title, priceXrp: l.price_xrp });
+      res.status(201).json({ ...order.rows[0], listing_title: l.title });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -215,6 +223,8 @@ router.post('/orders/:id/escrow/confirm', auth, async (req, res) => {
     if (!o.escrow_sequence) {
       await db.query("UPDATE orders SET status = 'completed' WHERE id = $1", [o.id]);
       await db.query("UPDATE listings SET status = 'sold' WHERE id = $1", [o.listing_id]);
+      pushNotif(o.seller_id, 'order_completed', { orderId: o.id });
+      pushNotif(o.buyer_id, 'order_completed', { orderId: o.id });
       return res.json({ status: 'completed', message: 'Order completed' });
     }
     const payload = await xummService.createEscrowFinishPayload({ buyerAddress: o.buyer_address, escrowOwner: o.buyer_address, offerSequence: o.escrow_sequence });
@@ -235,6 +245,8 @@ router.post('/orders/:id/escrow/webhook', async (req, res) => {
     } else if (txType === 'EscrowFinish') {
       await db.query("UPDATE orders SET status = 'completed', escrow_finish_tx_hash = $1 WHERE id = $2", [txHash, o.id]);
       await db.query("UPDATE listings SET status = 'sold' WHERE id = $1", [o.listing_id]);
+      pushNotif(o.seller_id, 'order_completed', { orderId: o.id });
+      pushNotif(o.buyer_id, 'order_completed', { orderId: o.id });
     }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -249,6 +261,8 @@ router.post('/orders/:id/dispute', auth, async (req, res) => {
     if (o.buyer_id !== req.user.id && o.seller_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
     await db.query("UPDATE orders SET status = 'disputed' WHERE id = $1", [o.id]);
     await db.query('INSERT INTO disputes (order_id, raised_by, reason) VALUES ($1,$2,$3)', [o.id, req.user.id, reason]);
+    const otherParty = req.user.id === o.buyer_id ? o.seller_id : o.buyer_id;
+    pushNotif(otherParty, 'dispute_opened', { orderId: o.id, reason });
     res.json({ status: 'disputed' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -261,6 +275,7 @@ router.post('/orders/:id/review', auth, async (req, res) => {
     const o = order.rows[0];
     if (o.status !== 'completed') return res.status(400).json({ error: 'Can only review completed orders' });
     await db.query('INSERT INTO reviews (order_id, reviewer_id, seller_id, rating, comment) VALUES ($1,$2,$3,$4,$5)', [o.id, req.user.id, o.seller_id, rating, comment]);
+      pushNotif(o.seller_id, 'new_review', { orderId: o.id, rating });
     await db.query('UPDATE users SET reputation_score = (SELECT AVG(rating) FROM reviews WHERE seller_id = $1) WHERE id = $1', [o.seller_id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -298,6 +313,11 @@ router.post('/disputes/:id/resolve', adminAuth, async (req, res) => {
     const dispute = await db.query('SELECT * FROM disputes WHERE id = $1', [req.params.id]);
     const status = favorBuyer ? 'refunded' : 'completed';
     await db.query('UPDATE orders SET status = $1 WHERE id = $2', [status, dispute.rows[0].order_id]);
+    const ord = await db.query('SELECT buyer_id, seller_id FROM orders WHERE id = UPDATE orders SET status = $1 WHERE id = $2', [status, dispute.rows[0].order_id]);', [dispute.rows[0].order_id]);
+    if (ord.rows[0]) {
+      pushNotif(ord.rows[0].buyer_id, 'dispute_resolved', { orderId: dispute.rows[0].order_id, favorBuyer });
+      pushNotif(ord.rows[0].seller_id, 'dispute_resolved', { orderId: dispute.rows[0].order_id, favorBuyer });
+    }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -313,6 +333,27 @@ router.patch('/admin/users/:id/ban', adminAuth, async (req, res) => {
 router.patch('/admin/listings/:id/remove', adminAuth, async (req, res) => {
   try {
     await db.query("UPDATE listings SET status = 'removed' WHERE id = $1", [req.params.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Notifications
+router.get('/notifications', auth, async (req, res) => {
+  try {
+    const r = await db.query('SELECT id, type, payload, is_read, created_at FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50', [req.user.id]);
+    const u = await db.query('SELECT COUNT(*) as cnt FROM notifications WHERE user_id = $1 AND is_read = false', [req.user.id]);
+    res.json({ items: r.rows, unread: Number(u.rows[0].cnt) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.post('/notifications/:id/read', auth, async (req, res) => {
+  try {
+    await db.query('UPDATE notifications SET is_read = true WHERE id = $1 AND user_id = $2', [req.params.id, req.user.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.post('/notifications/read-all', auth, async (req, res) => {
+  try {
+    await db.query('UPDATE notifications SET is_read = true WHERE user_id = $1 AND is_read = false', [req.user.id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
