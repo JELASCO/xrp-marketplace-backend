@@ -63,10 +63,10 @@ router.post('/auth/verify', async (req, res) => {
 
 router.get('/auth/me', auth, async (req, res) => {
   try {
-    const user = await db.query('SELECT id, username, wallet_address, role, bio, reputation_score, is_verified FROM users WHERE id = $1', [req.user.id]);
+    const user = await db.query('SELECT id, username, wallet_address, role, bio, reputation_score, is_verified, avatar_url, notification_prefs FROM users WHERE id = $1', [req.user.id]);
     if (!user.rows[0]) return res.status(404).json({ error: 'User not found' });
     const u = user.rows[0];
-    res.json({ id: u.id, username: u.username, walletAddress: u.wallet_address, role: u.role || 'user', bio: u.bio, reputationScore: u.reputation_score, isVerified: u.is_verified });
+    res.json({ id: u.id, username: u.username, walletAddress: u.wallet_address, role: u.role || 'user', bio: u.bio, reputationScore: u.reputation_score, isVerified: u.is_verified, avatar_url: u.avatar_url, notification_prefs: u.notification_prefs || {} });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -81,10 +81,10 @@ router.get('/users/:id', async (req, res) => {
 
 router.patch('/users/me', auth, async (req, res) => {
   try {
-    const { username, bio, avatar_url } = req.body;
+    const { username, bio, avatar_url, notification_prefs } = req.body;
     await db.query(
-      'UPDATE users SET username = COALESCE($1, username), bio = COALESCE($2, bio), avatar_url = COALESCE($3, avatar_url) WHERE id = $4::uuid',
-      [username || null, bio || null, avatar_url || null, req.user.id]
+      'UPDATE users SET username = COALESCE($1, username), bio = COALESCE($2, bio), avatar_url = COALESCE($3, avatar_url), notification_prefs = COALESCE($4, notification_prefs) WHERE id = $5::uuid',
+      [username || null, bio || null, avatar_url || null, notification_prefs ? JSON.stringify(notification_prefs) : null, req.user.id]
     );
     const r = await db.query('SELECT * FROM users WHERE id = $1::uuid', [req.user.id]);
     if (!r.rows[0]) return res.status(404).json({ error: 'User not found' });
@@ -314,6 +314,36 @@ router.patch('/admin/listings/:id/remove', adminAuth, async (req, res) => {
   try {
     await db.query("UPDATE listings SET status = 'removed' WHERE id = $1", [req.params.id]);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+
+// Seller stats
+router.get('/me/stats', auth, async (req, res) => {
+  try {
+    const ar = await db.query("SELECT COUNT(*) as cnt FROM listings WHERE seller_id = $1 AND status = 'active'", [req.user.id]);
+    const sr = await db.query("SELECT COUNT(*) as cnt FROM listings WHERE seller_id = $1 AND status = 'sold'", [req.user.id]);
+    const cr = await db.query("SELECT COUNT(*) as cnt FROM orders WHERE seller_id = $1 AND status = 'completed'", [req.user.id]);
+    const tr = await db.query("SELECT COALESCE(SUM(seller_receives_xrp),0) as total FROM orders WHERE seller_id = $1 AND status = 'completed'", [req.user.id]);
+    const er = await db.query("SELECT COUNT(*) as cnt FROM orders WHERE seller_id = $1 AND status = 'escrow_locked'", [req.user.id]);
+    const pr = await db.query("SELECT COUNT(*) as cnt FROM orders WHERE buyer_id = $1 AND status = 'completed'", [req.user.id]);
+    const dr = await db.query("SELECT COUNT(*) as cnt FROM disputes d JOIN orders o ON d.order_id = o.id WHERE (o.seller_id = $1 OR o.buyer_id = $1) AND d.status = 'open'", [req.user.id]);
+    const rr = await db.query("SELECT COUNT(*) as cnt, COALESCE(AVG(rating),0) as avg FROM reviews WHERE reviewed_id = $1", [req.user.id]);
+    res.json({ activeListings: Number(ar.rows[0].cnt), soldListings: Number(sr.rows[0].cnt), completedSales: Number(cr.rows[0].cnt), totalRevenueXrp: Number(tr.rows[0].total), inEscrow: Number(er.rows[0].cnt), completedPurchases: Number(pr.rows[0].cnt), openDisputes: Number(dr.rows[0].cnt), reviewCount: Number(rr.rows[0].cnt), avgRating: Number(rr.rows[0].avg) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/users/:id/listings', async (req, res) => {
+  try {
+    const r = await db.query("SELECT l.*, u.username, u.reputation_score, u.is_verified FROM listings l JOIN users u ON l.seller_id = u.id WHERE l.seller_id = $1 AND l.status IN ('active','sold') ORDER BY l.created_at DESC LIMIT 48", [req.params.id]);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/users/:id/reviews', async (req, res) => {
+  try {
+    const r = await db.query("SELECT rv.id, rv.rating, rv.comment, rv.created_at, u.id as reviewer_id, u.username as reviewer_username, u.avatar_url as reviewer_avatar FROM reviews rv JOIN users u ON rv.reviewer_id = u.id WHERE rv.reviewed_id = $1 ORDER BY rv.created_at DESC LIMIT 20", [req.params.id]);
+    res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
