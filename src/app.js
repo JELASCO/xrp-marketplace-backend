@@ -44,7 +44,7 @@ async function migrate() {
 try {
   app.use('/api', require('./routes'));
 } catch(e) {
-  console.warn('[Routes]', e.message);
+  console.warn('[Routes]', e.message, e.stack);
   app.get('/api', (req, res) => res.json({ status: 'starting' }));
 }
 
