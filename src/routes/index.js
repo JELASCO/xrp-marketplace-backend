@@ -260,8 +260,8 @@ router.post('/orders/:id/review', auth, async (req, res) => {
     if (!order.rows[0]) return res.status(404).json({ error: 'Not found' });
     const o = order.rows[0];
     if (o.status !== 'completed') return res.status(400).json({ error: 'Can only review completed orders' });
-    await db.query('INSERT INTO reviews (order_id, reviewer_id, seller_id, rating, comment) VALUES ($1,$2,$3,$4,$5)', [o.id, req.user.id, o.seller_id, rating, comment]);
-    await db.query('UPDATE users SET reputation_score = (SELECT AVG(rating) FROM reviews WHERE seller_id = $1) WHERE id = $1', [o.seller_id]);
+    await db.query('INSERT INTO reviews (order_id, reviewer_id, reviewed_id, rating, comment) VALUES ($1,$2,$3,$4,$5)', [o.id, req.user.id, o.seller_id, rating, comment]);
+    await db.query('UPDATE users SET reputation_score = (SELECT AVG(rating) FROM reviews WHERE reviewed_id = $1) WHERE id = $1', [o.seller_id]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
