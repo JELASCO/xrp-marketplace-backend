@@ -95,11 +95,17 @@ router.patch('/users/me', auth, async (req, res) => {
 // Listings
 router.get('/listings', async (req, res) => {
   try {
-    const { category, game, sort, limit = 48, offset = 0 } = req.query;
+    const { category, game, sort, search, minPrice, maxPrice, limit = 48, offset = 0 } = req.query;
     let q = "SELECT l.*, u.username, u.reputation_score, u.is_verified FROM listings l JOIN users u ON l.seller_id = u.id WHERE l.status = 'active'";
     const params = [];
     if (category) { params.push(category); q += ' AND l.category = $' + params.length; }
     if (game) { params.push(game); q += ' AND l.game = $' + params.length; }
+    if (search) {
+      params.push('%' + search.toLowerCase() + '%');
+      q += ' AND (LOWER(l.title) LIKE $' + params.length + ' OR LOWER(l.description) LIKE $' + params.length + ')';
+    }
+    if (minPrice) { params.push(parseFloat(minPrice)); q += ' AND l.price_xrp >= $' + params.length; }
+    if (maxPrice) { params.push(parseFloat(maxPrice)); q += ' AND l.price_xrp <= $' + params.length; }
     const orderMap = { price_asc: 'l.price_xrp ASC', price_desc: 'l.price_xrp DESC', views: 'l.views DESC', created_at: 'l.created_at DESC' };
     q += ' ORDER BY l.is_featured DESC, ' + (orderMap[sort] || 'l.created_at DESC');
     params.push(parseInt(limit)); q += ' LIMIT $' + params.length;
