@@ -383,4 +383,66 @@ router.delete('/favorites/:listingId', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+
+// Messages
+router.get('/messages', auth, async (req, res) => {
+  try {
+    // Get all conversations (distinct order_id) with latest message
+    const r = await db.query(`
+      SELECT DISTINCT ON (m.order_id)
+        m.order_id, m.content, m.created_at, m.sender_id,
+        o.listing_id, l.title as listing_title, l.images as listing_images,
+        CASE WHEN o.buyer_id = $1 THEN o.seller_id ELSE o.buyer_id END as other_user_id,
+        CASE WHEN o.buyer_id = $1 THEN su.username ELSE bu.username END as other_username,
+        (SELECT COUNT(*) FROM messages m2 WHERE m2.order_id = m.order_id AND m2.sender_id != $1 AND m2.read_at IS NULL) as unread
+      FROM messages m
+      JOIN orders o ON m.order_id = o.id
+      JOIN listings l ON o.listing_id = l.id
+      JOIN users su ON o.seller_id = su.id
+      JOIN users bu ON o.buyer_id = bu.id
+      WHERE o.buyer_id = $1 OR o.seller_id = $1
+      ORDER BY m.order_id, m.created_at DESC
+    `, [req.user.id]);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/messages/:orderId', auth, async (req, res) => {
+  try {
+    const o = await db.query('SELECT * FROM orders WHERE id = $1', [req.params.orderId]);
+    if (!o.rows[0]) return res.status(404).json({ error: 'Order not found' });
+    const order = o.rows[0];
+    if (order.buyer_id !== req.user.id && order.seller_id !== req.user.id)
+      return res.status(403).json({ error: 'Forbidden' });
+    // Mark messages as read
+    await db.query('UPDATE messages SET read_at = NOW() WHERE order_id = $1 AND sender_id != $2 AND read_at IS NULL', [req.params.orderId, req.user.id]);
+    const r = await db.query(`
+      SELECT m.*, u.username, u.avatar_url FROM messages m
+      JOIN users u ON m.sender_id = u.id
+      WHERE m.order_id = $1 ORDER BY m.created_at ASC
+    `, [req.params.orderId]);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/messages/:orderId', auth, async (req, res) => {
+  try {
+    const { content } = req.body;
+    if (!content || !content.trim()) return res.status(400).json({ error: 'Message required' });
+    const o = await db.query('SELECT * FROM orders WHERE id = $1', [req.params.orderId]);
+    if (!o.rows[0]) return res.status(404).json({ error: 'Order not found' });
+    const order = o.rows[0];
+    if (order.buyer_id !== req.user.id && order.seller_id !== req.user.id)
+      return res.status(403).json({ error: 'Forbidden' });
+    const r = await db.query(
+      'INSERT INTO messages (order_id, sender_id, content) VALUES ($1, $2, $3) RETURNING *',
+      [req.params.orderId, req.user.id, content.trim()]
+    );
+    const msg = r.rows[0];
+    const recipientId = order.buyer_id === req.user.id ? order.seller_id : order.buyer_id;
+    notify(recipientId, 'new_message', { orderId: req.params.orderId, content: content.trim().slice(0, 80) });
+    res.json(msg);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;
