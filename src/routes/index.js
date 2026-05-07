@@ -353,4 +353,34 @@ router.get('/users/:id/reviews', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+
+// Favorites
+router.get('/favorites', auth, async (req, res) => {
+  try {
+    const r = await db.query("SELECT l.*, u.username, u.reputation_score, u.is_verified, f.created_at as favorited_at FROM favorites f JOIN listings l ON f.listing_id = l.id JOIN users u ON l.seller_id = u.id WHERE f.user_id = $1 ORDER BY f.created_at DESC", [req.user.id]);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/favorites/ids', auth, async (req, res) => {
+  try {
+    const r = await db.query("SELECT listing_id FROM favorites WHERE user_id = $1", [req.user.id]);
+    res.json(r.rows.map(row => row.listing_id));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/favorites/:listingId', auth, async (req, res) => {
+  try {
+    await db.query("INSERT INTO favorites (user_id, listing_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", [req.user.id, req.params.listingId]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete('/favorites/:listingId', auth, async (req, res) => {
+  try {
+    await db.query("DELETE FROM favorites WHERE user_id = $1 AND listing_id = $2", [req.user.id, req.params.listingId]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;
