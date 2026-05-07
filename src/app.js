@@ -33,7 +33,15 @@ async function migrate() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`);
     await pool.query(`CREATE TABLE IF NOT EXISTS notifications (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, type VARCHAR(40) NOT NULL, payload JSONB NOT NULL DEFAULT '{}'::jsonb, is_read BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW())`);
       await pool.query(`CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id, is_read, created_at DESC)`);
-      console.log('[DB] Migration complete');
+      
+    await pool.query(`CREATE TABLE IF NOT EXISTS favorites (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id),
+      listing_id UUID NOT NULL REFERENCES listings(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(user_id, listing_id)
+    )`);
+    console.log('[DB] Migration complete');
   } catch(e) {
     console.error('[DB] Migration error:', e.message);
   } finally {
