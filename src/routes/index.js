@@ -513,4 +513,77 @@ router.get('/admin/users', adminAuth, async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+
+// Offers
+router.post('/offers', auth, async (req, res) => {
+  try {
+    const { listingId, amountXrp, message } = req.body;
+    if (!listingId || !amountXrp) return res.status(400).json({ error: 'listingId and amountXrp required' });
+    const lr = await db.query("SELECT * FROM listings WHERE id=$1 AND status='active'", [listingId]);
+    if (!lr.rows[0]) return res.status(404).json({ error: 'Listing not found' });
+    const listing = lr.rows[0];
+    if (listing.seller_id === req.user.id) return res.status(400).json({ error: 'Cannot offer on own listing' });
+    // Check for existing pending offer
+    await db.query("UPDATE offers SET status='cancelled' WHERE listing_id=$1 AND buyer_id=$2 AND status='pending'", [listingId, req.user.id]);
+    const r = await db.query(
+      "INSERT INTO offers (listing_id, buyer_id, seller_id, amount_xrp, message) VALUES ($1,$2,$3,$4,$5) RETURNING *",
+      [listingId, req.user.id, listing.seller_id, amountXrp, message||null]
+    );
+    try { notify(listing.seller_id, 'new_offer', { listingId, listingTitle: listing.title, amount: amountXrp }); } catch(e) {}
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/offers/received', auth, async (req, res) => {
+  try {
+    const r = await db.query(`
+      SELECT o.*, l.title as listing_title, l.price_xrp, l.images as listing_images, u.username as buyer_username
+      FROM offers o JOIN listings l ON o.listing_id=l.id JOIN users u ON o.buyer_id=u.id
+      WHERE o.seller_id=$1 AND o.status='pending' ORDER BY o.created_at DESC
+    `, [req.user.id]);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/offers/sent', auth, async (req, res) => {
+  try {
+    const r = await db.query(`
+      SELECT o.*, l.title as listing_title, l.price_xrp, l.images as listing_images, u.username as seller_username
+      FROM offers o JOIN listings l ON o.listing_id=l.id JOIN users u ON o.seller_id=u.id
+      WHERE o.buyer_id=$1 ORDER BY o.created_at DESC LIMIT 50
+    `, [req.user.id]);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+router.patch('/offers/:id/accept', auth, async (req, res) => {
+  try {
+    const or = await db.query("SELECT * FROM offers WHERE id=$1 AND seller_id=$2 AND status='pending'", [req.params.id, req.user.id]);
+    if (!or.rows[0]) return res.status(404).json({ error: 'Offer not found' });
+    await db.query("UPDATE offers SET status='accepted', updated_at=NOW() WHERE id=$1", [req.params.id]);
+    try { notify(or.rows[0].buyer_id, 'offer_accepted', { listingId: or.rows[0].listing_id, amount: or.rows[0].amount_xrp }); } catch(e) {}
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+router.patch('/offers/:id/decline', auth, async (req, res) => {
+  try {
+    const or = await db.query("SELECT * FROM offers WHERE id=$1 AND seller_id=$2 AND status='pending'", [req.params.id, req.user.id]);
+    if (!or.rows[0]) return res.status(404).json({ error: 'Offer not found' });
+    await db.query("UPDATE offers SET status='declined', updated_at=NOW() WHERE id=$1", [req.params.id]);
+    try { notify(or.rows[0].buyer_id, 'offer_declined', { listingId: or.rows[0].listing_id }); } catch(e) {}
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/offers/listing/:listingId', auth, async (req, res) => {
+  try {
+    const r = await db.query(`
+      SELECT o.*, u.username as buyer_username FROM offers o JOIN users u ON o.buyer_id=u.id
+      WHERE o.listing_id=$1 AND o.seller_id=$2 AND o.status='pending' ORDER BY o.amount_xrp DESC
+    `, [req.params.listingId, req.user.id]);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;
