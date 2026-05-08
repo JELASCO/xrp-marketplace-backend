@@ -561,25 +561,21 @@ router.patch('/offers/:id/accept', auth, async (req, res) => {
     const or = await db.query("SELECT * FROM offers WHERE id=$1 AND seller_id=$2 AND status='pending'", [req.params.id, req.user.id]);
     if (!or.rows[0]) return res.status(404).json({ error: 'Offer not found' });
     const offer = or.rows[0];
-    // Get listing + buyer wallet
-    const lr = await db.query("SELECT * FROM listings WHERE id=$1", [offer.listing_id]);
-    const br = await db.query("SELECT wallet_address FROM users WHERE id=$1", [offer.buyer_id]);
-    const sr = await db.query("SELECT wallet_address FROM users WHERE id=$1", [req.user.id]);
-    if (!lr.rows[0] || !br.rows[0] || !sr.rows[0]) return res.status(400).json({ error: 'Missing data' });
-    const listing = lr.rows[0];
-    const commission = offer.amount_xrp * 0.03;
-    const sellerReceives = offer.amount_xrp - commission;
-    // Create order at offer price
-    const newOrder = await db.query(
-      `INSERT INTO orders (listing_id, buyer_id, seller_id, buyer_wallet_address, seller_wallet_address, total_xrp, commission_rate, commission_xrp, seller_receives_xrp)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [offer.listing_id, offer.buyer_id, req.user.id, br.rows[0].wallet_address, sr.rows[0].wallet_address, offer.amount_xrp, 0.03, commission, sellerReceives]
-    );
-    // Mark offer accepted, store order id
+    if (!offer.order_id) return res.status(400).json({ error: 'No escrow order linked to this offer' });
+    // Check the order is escrow_locked
+    const orderRow = await db.query('SELECT * FROM orders WHERE id=$1', [offer.order_id]);
+    if (!orderRow.rows[0]) return res.status(404).json({ error: 'Order not found' });
+    const order = orderRow.rows[0];
+    if (order.status !== 'escrow_locked') return res.status(400).json({ error: 'Escrow not locked yet — buyer must complete Xumm payment first' });
+    // Release escrow to seller
+    const releaseResult = await escrowService.releaseEscrow(order);
+    await db.query("UPDATE orders SET status='completed', updated_at=NOW() WHERE id=$1", [order.id]);
     await db.query("UPDATE offers SET status='accepted', updated_at=NOW() WHERE id=$1", [offer.id]);
-    // Notify buyer with order id
-    try { notify(offer.buyer_id, 'offer_accepted', { orderId: newOrder.rows[0].id, listingId: offer.listing_id, listingTitle: listing.title, amount: offer.amount_xrp }); } catch(e) {}
-    res.json({ ok: true, orderId: newOrder.rows[0].id });
+    await db.query("UPDATE listings SET status='sold' WHERE id=$1", [offer.listing_id]);
+    // Decline all other pending offers for this listing
+    await db.query("UPDATE offers SET status='declined', updated_at=NOW() WHERE listing_id=$1 AND id!=$2 AND status='pending'", [offer.listing_id, offer.id]);
+    try { notify(offer.buyer_id, 'offer_accepted', { orderId: order.id, listingId: offer.listing_id, amount: offer.amount_xrp }); } catch(e) {}
+    res.json({ ok: true, orderId: order.id });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -587,8 +583,17 @@ router.patch('/offers/:id/decline', auth, async (req, res) => {
   try {
     const or = await db.query("SELECT * FROM offers WHERE id=$1 AND seller_id=$2 AND status='pending'", [req.params.id, req.user.id]);
     if (!or.rows[0]) return res.status(404).json({ error: 'Offer not found' });
-    await db.query("UPDATE offers SET status='declined', updated_at=NOW() WHERE id=$1", [req.params.id]);
-    try { notify(or.rows[0].buyer_id, 'offer_declined', { listingId: or.rows[0].listing_id }); } catch(e) {}
+    const offer = or.rows[0];
+    // If escrow is locked, cancel it (return XRP to buyer)
+    if (offer.order_id) {
+      const orderRow = await db.query('SELECT * FROM orders WHERE id=$1', [offer.order_id]);
+      if (orderRow.rows[0] && orderRow.rows[0].status === 'escrow_locked') {
+        try { await escrowService.cancelEscrow(orderRow.rows[0]); } catch(e) { console.error('Cancel escrow error:', e.message); }
+        await db.query("UPDATE orders SET status='refunded', updated_at=NOW() WHERE id=$1", [offer.order_id]);
+      }
+    }
+    await db.query("UPDATE offers SET status='declined', updated_at=NOW() WHERE id=$1", [offer.id]);
+    try { notify(offer.buyer_id, 'offer_declined', { listingId: offer.listing_id }); } catch(e) {}
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
