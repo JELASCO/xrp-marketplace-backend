@@ -504,4 +504,13 @@ router.patch('/admin/users/:id/verify', adminAuth, async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+
+// Admin: list all users
+router.get('/admin/users', adminAuth, async (req, res) => {
+  try {
+    const r = await db.query("SELECT id, username, wallet_address, role, is_verified, is_banned, reputation_score, created_at FROM users ORDER BY created_at DESC LIMIT 500");
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;
