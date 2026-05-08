@@ -441,7 +441,7 @@ router.post('/messages/:orderId', auth, async (req, res) => {
     );
     const msg = r.rows[0];
     const recipientId = order.buyer_id === req.user.id ? order.seller_id : order.buyer_id;
-    notify(recipientId, 'new_message', { orderId: req.params.orderId, content: content.trim().slice(0, 80) });
+    try { notify(recipientId, 'new_message', { orderId: req.params.orderId, content: content.trim().slice(0, 80) }); } catch(ne) {}
     res.json(msg);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -461,7 +461,7 @@ router.post('/contact/:listingId', auth, async (req, res) => {
       [listing.id, req.user.id, listing.seller_id, content.trim()]
     );
     await db.query("UPDATE contact_messages SET read_at = NULL WHERE id = $1", [mr.rows[0].id]);
-    notify(listing.seller_id, 'new_inquiry', { listingId: listing.id, listingTitle: listing.title, content: content.trim().slice(0, 80) });
+    try { notify(listing.seller_id, 'new_inquiry', { listingId: listing.id, listingTitle: listing.title, content: content.trim().slice(0, 80) }); } catch(ne) { console.error('notify err:', ne.message); }
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
