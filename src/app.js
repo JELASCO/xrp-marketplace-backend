@@ -60,6 +60,18 @@ async function migrate() {
       read_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
+    
+    await pool.query(`CREATE TABLE IF NOT EXISTS offers (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      listing_id UUID NOT NULL REFERENCES listings(id) ON DELETE CASCADE,
+      buyer_id UUID NOT NULL REFERENCES users(id),
+      seller_id UUID NOT NULL REFERENCES users(id),
+      amount_xrp DECIMAL(18,6) NOT NULL,
+      message TEXT,
+      status VARCHAR(20) DEFAULT 'pending',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
     console.log('[DB] Migration complete');
   } catch(e) {
     console.error('[DB] Migration error:', e.message);
