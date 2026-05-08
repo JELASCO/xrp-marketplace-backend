@@ -494,4 +494,14 @@ router.get('/inquiries', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+
+// Admin: verify/unverify seller
+router.patch('/admin/users/:id/verify', adminAuth, async (req, res) => {
+  try {
+    const { verified } = req.body;
+    await db.query("UPDATE users SET is_verified=$1 WHERE id=$2", [!!verified, req.params.id]);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;
