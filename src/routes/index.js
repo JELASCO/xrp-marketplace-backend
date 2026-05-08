@@ -445,4 +445,52 @@ router.post('/messages/:orderId', auth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+
+// Contact seller (inquiry - no order needed)
+router.post('/contact/:listingId', auth, async (req, res) => {
+  try {
+    const { content } = req.body;
+    if (!content || !content.trim()) return res.status(400).json({ error: 'Message required' });
+    const lr = await db.query("SELECT * FROM listings WHERE id = $1", [req.params.listingId]);
+    if (!lr.rows[0]) return res.status(404).json({ error: 'Listing not found' });
+    const listing = lr.rows[0];
+    if (listing.seller_id === req.user.id) return res.status(400).json({ error: 'Cannot message yourself' });
+    const mr = await db.query(
+      "INSERT INTO contact_messages (listing_id, sender_id, receiver_id, content) VALUES ($1,$2,$3,$4) RETURNING *",
+      [listing.id, req.user.id, listing.seller_id, content.trim()]
+    );
+    await db.query("UPDATE contact_messages SET read_at = NULL WHERE id = $1", [mr.rows[0].id]);
+    notify(listing.seller_id, 'new_inquiry', { listingId: listing.id, listingTitle: listing.title, content: content.trim().slice(0, 80) });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/contact/:listingId', auth, async (req, res) => {
+  try {
+    const r = await db.query(
+      "SELECT cm.*, u.username as sender_username, u.avatar_url as sender_avatar FROM contact_messages cm JOIN users u ON cm.sender_id = u.id WHERE cm.listing_id = $1 AND (cm.sender_id = $2 OR cm.receiver_id = $2) ORDER BY cm.created_at ASC",
+      [req.params.listingId, req.user.id]
+    );
+    // Mark as read
+    await db.query("UPDATE contact_messages SET read_at = NOW() WHERE listing_id = $1 AND receiver_id = $2 AND read_at IS NULL", [req.params.listingId, req.user.id]);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.get('/inquiries', auth, async (req, res) => {
+  try {
+    const r = await db.query(`
+      SELECT DISTINCT ON (cm.listing_id) cm.*, l.title as listing_title, l.images as listing_images,
+        u.username as other_username,
+        (SELECT COUNT(*) FROM contact_messages cm2 WHERE cm2.listing_id = cm.listing_id AND cm2.receiver_id = $1 AND cm2.read_at IS NULL) as unread
+      FROM contact_messages cm
+      JOIN listings l ON cm.listing_id = l.id
+      JOIN users u ON (CASE WHEN cm.sender_id = $1 THEN cm.receiver_id ELSE cm.sender_id END) = u.id
+      WHERE cm.sender_id = $1 OR cm.receiver_id = $1
+      ORDER BY cm.listing_id, cm.created_at DESC
+    `, [req.user.id]);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;
