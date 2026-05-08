@@ -72,6 +72,8 @@ async function migrate() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`);
+    
+    await pool.query('ALTER TABLE offers ADD COLUMN IF NOT EXISTS order_id UUID REFERENCES orders(id)');
     console.log('[DB] Migration complete');
   } catch(e) {
     console.error('[DB] Migration error:', e.message);
