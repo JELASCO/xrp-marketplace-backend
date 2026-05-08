@@ -6,6 +6,7 @@ const db = require('../db');
 const jwt = require('jsonwebtoken');
 const escrowService = require('../escrow/escrowService');
 const xummService = require('../xumm/xummService');
+const { notify } = require('../notifications/socket');
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
