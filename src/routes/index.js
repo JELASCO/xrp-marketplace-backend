@@ -560,9 +560,26 @@ router.patch('/offers/:id/accept', auth, async (req, res) => {
   try {
     const or = await db.query("SELECT * FROM offers WHERE id=$1 AND seller_id=$2 AND status='pending'", [req.params.id, req.user.id]);
     if (!or.rows[0]) return res.status(404).json({ error: 'Offer not found' });
-    await db.query("UPDATE offers SET status='accepted', updated_at=NOW() WHERE id=$1", [req.params.id]);
-    try { notify(or.rows[0].buyer_id, 'offer_accepted', { listingId: or.rows[0].listing_id, amount: or.rows[0].amount_xrp }); } catch(e) {}
-    res.json({ ok: true });
+    const offer = or.rows[0];
+    // Get listing + buyer wallet
+    const lr = await db.query("SELECT * FROM listings WHERE id=$1", [offer.listing_id]);
+    const br = await db.query("SELECT wallet_address FROM users WHERE id=$1", [offer.buyer_id]);
+    const sr = await db.query("SELECT wallet_address FROM users WHERE id=$1", [req.user.id]);
+    if (!lr.rows[0] || !br.rows[0] || !sr.rows[0]) return res.status(400).json({ error: 'Missing data' });
+    const listing = lr.rows[0];
+    const commission = offer.amount_xrp * 0.03;
+    const sellerReceives = offer.amount_xrp - commission;
+    // Create order at offer price
+    const newOrder = await db.query(
+      `INSERT INTO orders (listing_id, buyer_id, seller_id, price_xrp, seller_receives_xrp, commission_xrp, status, buyer_wallet, seller_wallet)
+       VALUES ($1,$2,$3,$4,$5,$6,'awaiting_payment',$7,$8) RETURNING *`,
+      [offer.listing_id, offer.buyer_id, req.user.id, offer.amount_xrp, sellerReceives, commission, br.rows[0].wallet_address, sr.rows[0].wallet_address]
+    );
+    // Mark offer accepted, store order id
+    await db.query("UPDATE offers SET status='accepted', updated_at=NOW() WHERE id=$1", [offer.id]);
+    // Notify buyer with order id
+    try { notify(offer.buyer_id, 'offer_accepted', { orderId: newOrder.rows[0].id, listingId: offer.listing_id, listingTitle: listing.title, amount: offer.amount_xrp }); } catch(e) {}
+    res.json({ ok: true, orderId: newOrder.rows[0].id });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
