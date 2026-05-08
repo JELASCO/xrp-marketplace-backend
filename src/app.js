@@ -50,6 +50,16 @@ async function migrate() {
       read_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`);
+    
+    await pool.query(`CREATE TABLE IF NOT EXISTS contact_messages (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      listing_id UUID NOT NULL REFERENCES listings(id) ON DELETE CASCADE,
+      sender_id UUID NOT NULL REFERENCES users(id),
+      receiver_id UUID NOT NULL REFERENCES users(id),
+      content TEXT NOT NULL,
+      read_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
     console.log('[DB] Migration complete');
   } catch(e) {
     console.error('[DB] Migration error:', e.message);
