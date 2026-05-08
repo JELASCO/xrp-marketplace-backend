@@ -571,9 +571,9 @@ router.patch('/offers/:id/accept', auth, async (req, res) => {
     const sellerReceives = offer.amount_xrp - commission;
     // Create order at offer price
     const newOrder = await db.query(
-      `INSERT INTO orders (listing_id, buyer_id, seller_id, price_xrp, seller_receives_xrp, commission_xrp, status, buyer_wallet, seller_wallet)
-       VALUES ($1,$2,$3,$4,$5,$6,'awaiting_payment',$7,$8) RETURNING *`,
-      [offer.listing_id, offer.buyer_id, req.user.id, offer.amount_xrp, sellerReceives, commission, br.rows[0].wallet_address, sr.rows[0].wallet_address]
+      `INSERT INTO orders (listing_id, buyer_id, seller_id, buyer_wallet_address, seller_wallet_address, total_xrp, commission_rate, commission_xrp, seller_receives_xrp)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [offer.listing_id, offer.buyer_id, req.user.id, br.rows[0].wallet_address, sr.rows[0].wallet_address, offer.amount_xrp, 0.03, commission, sellerReceives]
     );
     // Mark offer accepted, store order id
     await db.query("UPDATE offers SET status='accepted', updated_at=NOW() WHERE id=$1", [offer.id]);
