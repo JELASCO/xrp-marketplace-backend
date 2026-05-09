@@ -629,4 +629,27 @@ router.get('/offers/listing/:listingId', auth, async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+
+// Public stats endpoint
+router.get('/stats', async (req, res) => {
+  try {
+    const r = await db.query(`
+      SELECT
+        (SELECT COUNT(*) FROM users WHERE is_verified=true) as verified_sellers,
+        (SELECT COUNT(*) FROM orders WHERE status IN ('completed','escrow_locked','delivered')) as items_traded,
+        (SELECT COALESCE(SUM(total_xrp),0) FROM orders WHERE status='completed') as volume_xrp,
+        (SELECT COUNT(*) FROM listings WHERE status='active') as active_listings,
+        (SELECT COUNT(*) FROM users) as total_users
+    `);
+    const d = r.rows[0];
+    res.json({
+      verified_sellers: Number(d.verified_sellers),
+      items_traded: Number(d.items_traded),
+      volume_xrp: Number(d.volume_xrp),
+      active_listings: Number(d.active_listings),
+      total_users: Number(d.total_users)
+    });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;
