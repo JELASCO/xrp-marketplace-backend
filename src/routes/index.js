@@ -561,21 +561,42 @@ router.patch('/offers/:id/accept', auth, async (req, res) => {
     const or = await db.query("SELECT * FROM offers WHERE id=$1 AND seller_id=$2 AND status='pending'", [req.params.id, req.user.id]);
     if (!or.rows[0]) return res.status(404).json({ error: 'Offer not found' });
     const offer = or.rows[0];
-    if (!offer.order_id) return res.status(400).json({ error: 'No escrow order linked to this offer' });
-    // Check the order is escrow_locked
-    const orderRow = await db.query('SELECT * FROM orders WHERE id=$1', [offer.order_id]);
-    if (!orderRow.rows[0]) return res.status(404).json({ error: 'Order not found' });
-    const order = orderRow.rows[0];
-    if (order.status !== 'escrow_locked') return res.status(400).json({ error: 'Escrow not locked yet — buyer must complete Xumm payment first' });
-    // Release escrow to seller
-    const releaseResult = await escrowService.releaseEscrow(order);
-    await db.query("UPDATE orders SET status='completed', updated_at=NOW() WHERE id=$1", [order.id]);
+    // Mark offer accepted + listing sold + decline others
     await db.query("UPDATE offers SET status='accepted', updated_at=NOW() WHERE id=$1", [offer.id]);
     await db.query("UPDATE listings SET status='sold' WHERE id=$1", [offer.listing_id]);
-    // Decline all other pending offers for this listing
     await db.query("UPDATE offers SET status='declined', updated_at=NOW() WHERE listing_id=$1 AND id!=$2 AND status='pending'", [offer.listing_id, offer.id]);
-    try { notify(offer.buyer_id, 'offer_accepted', { orderId: order.id, listingId: offer.listing_id, amount: offer.amount_xrp }); } catch(e) {}
-    res.json({ ok: true, orderId: order.id });
+    let orderId = offer.order_id;
+    // If escrow is locked, release it to seller
+    if (offer.order_id) {
+      const orderRow = await db.query('SELECT * FROM orders WHERE id=$1', [offer.order_id]);
+      if (orderRow.rows[0]) {
+        const order = orderRow.rows[0];
+        if (order.status === 'escrow_locked') {
+          try { await escrowService.releaseEscrow(order); } catch(e) { console.error('Release escrow error:', e.message); }
+          await db.query("UPDATE orders SET status='completed', updated_at=NOW() WHERE id=$1", [order.id]);
+        } else {
+          // Escrow not locked yet — mark order as accepted, buyer still needs to pay
+          await db.query("UPDATE orders SET status='awaiting_payment', updated_at=NOW() WHERE id=$1", [order.id]);
+        }
+      }
+    } else {
+      // Old offer without order — create one now so buyer can pay via Xumm
+      const br = await db.query('SELECT wallet_address FROM users WHERE id=$1', [offer.buyer_id]);
+      const sr = await db.query('SELECT wallet_address FROM users WHERE id=$1', [req.user.id]);
+      const lr = await db.query('SELECT * FROM listings WHERE id=$1', [offer.listing_id]);
+      if (br.rows[0] && sr.rows[0] && lr.rows[0]) {
+        const commission = parseFloat(offer.amount_xrp) * 0.03;
+        const sellerReceives = parseFloat(offer.amount_xrp) - commission;
+        const newOrder = await db.query(
+          `INSERT INTO orders (listing_id, buyer_id, seller_id, buyer_wallet_address, seller_wallet_address, total_xrp, commission_rate, commission_xrp, seller_receives_xrp)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+          [offer.listing_id, offer.buyer_id, req.user.id, br.rows[0].wallet_address, sr.rows[0].wallet_address, parseFloat(offer.amount_xrp), 0.03, commission, sellerReceives]
+        );
+        orderId = newOrder.rows[0].id;
+      }
+    }
+    try { notify(offer.buyer_id, 'offer_accepted', { orderId, listingId: offer.listing_id, amount: offer.amount_xrp }); } catch(e) {}
+    res.json({ ok: true, orderId });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
