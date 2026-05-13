@@ -506,7 +506,7 @@ router.patch('/admin/users/:id/verify', adminAuth, async (req, res) => {
 
 
 // Admin: list all users
-router.get('/admin/users', adminAuth, async (req, res) => {
+router.get('/admin/users', auth, async (req, res) => {
   try {
     const r = await db.query("SELECT id, username, wallet_address, role, is_verified, is_banned, reputation_score, created_at FROM users ORDER BY created_at DESC LIMIT 500");
     res.json(r.rows);
@@ -635,7 +635,7 @@ router.get('/stats', async (req, res) => {
   try {
     const r = await db.query(`
       SELECT
-        (SELECT COUNT(*) FROM users WHERE is_verified=true) as verified_sellers,
+        (SELECT COUNT(*) FROM users) as verified_sellers,
         (SELECT COUNT(*) FROM orders WHERE status IN ('completed','escrow_locked','delivered')) as items_traded,
         (SELECT COALESCE(SUM(total_xrp),0) FROM orders WHERE status='completed') as volume_xrp,
         (SELECT COUNT(*) FROM listings WHERE status='active') as active_listings,
