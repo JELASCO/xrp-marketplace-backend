@@ -30,7 +30,7 @@ async function xummGet(endpoint) {
 
 async function createSignInPayload() {
   const d = await xummPost('/payload', { txjson: { TransactionType: 'SignIn' }, options: { expire: 10 } });
-  return { uuid: d.uuid, qrUrl: d.refs && d.refs.qr_png ? d.refs.qr_png : null, wsUrl: d.refs && d.refs.websocket_status ? d.refs.websocket_status : null };
+  return { uuid: d.uuid, qrUrl: d.refs && d.refs.qr_png ? d.refs.qr_png : null, wsUrl: d.refs && d.refs.websocket_status ? d.refs.websocket_status : null, nextUrl: (d.next && d.next.always) ? d.next.always : null };
 }
 
 async function verifySignIn(uuid) {
