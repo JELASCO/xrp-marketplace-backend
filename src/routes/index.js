@@ -196,7 +196,8 @@ router.post('/orders/:id/escrow/xumm-payload', auth, async (req, res) => {
     const buyerAddress = buyer.rows[0].wallet_address;
     const RIPPLE_EPOCH = 946684800;
     const cancelAfter = Math.floor(Date.now() / 1000) - RIPPLE_EPOCH + 7 * 86400;
-    const payload = await xummService.createEscrowPayload({ buyerAddress, sellerAddress: o.seller_address, xrpAmount: o.total_xrp, cancelAfter, orderId: o.id });
+    const finishAfter = Math.floor(Date.now() / 1000) - RIPPLE_EPOCH + 60;
+    const payload = await xummService.createEscrowPayload({ buyerAddress, sellerAddress: o.seller_address, xrpAmount: o.total_xrp, cancelAfter, finishAfter, orderId: o.id });
     res.json(payload);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
