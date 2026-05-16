@@ -46,7 +46,7 @@ async function verifySignIn(uuid) {
 
 async function createEscrowPayload(opts) {
   var drops = Math.floor(parseFloat(opts.xrpAmount) * 1000000).toString();
-  var d = await xummPost('/payload', { txjson: { TransactionType: 'EscrowCreate', Account: opts.buyerAddress, Destination: opts.sellerAddress, Amount: drops, CancelAfter: opts.cancelAfter, Memos: [{ Memo: { MemoData: Buffer.from(opts.orderId).toString('hex').toUpperCase(), MemoType: Buffer.from('orderId').toString('hex').toUpperCase() } }] }, options: { expire: 10, return_url: { web: (process.env.FRONTEND_URL || '') + '/orders' } } });
+  var d = await xummPost('/payload', { txjson: { TransactionType: 'EscrowCreate', Account: opts.buyerAddress, Destination: opts.sellerAddress, Amount: drops, CancelAfter: opts.cancelAfter, FinishAfter: opts.finishAfter, Memos: [{ Memo: { MemoData: Buffer.from(opts.orderId).toString('hex').toUpperCase(), MemoType: Buffer.from('orderId').toString('hex').toUpperCase() } }] }, options: { expire: 10, return_url: { web: (process.env.FRONTEND_URL || '') + '/orders' } } });
   return { uuid: d.uuid, qrUrl: d.refs && d.refs.qr_png ? d.refs.qr_png : null, wsUrl: d.refs && d.refs.websocket_status ? d.refs.websocket_status : null, deepLink: d.next && d.next.always ? d.next.always : null };
 }
 
