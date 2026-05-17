@@ -221,9 +221,11 @@ router.post('/orders/:id/escrow/confirm', auth, async (req, res) => {
     if (o.buyer_id !== req.user.id) return res.status(403).json({ error: 'Forbidden' });
     if (o.status === 'completed' || o.status === 'refunded' || o.status === 'disputed') return res.status(400).json({ error: 'Order already ' + o.status });
     if (!o.escrow_sequence) {
-      await db.query("UPDATE orders SET status = 'completed' WHERE id = $1", [o.id]);
-      await db.query("UPDATE listings SET status = 'sold' WHERE id = $1", [o.listing_id]);
-      return res.json({ status: 'completed', message: 'Order completed' });
+      const seq = req.body && req.body.escrowSequence;
+      const hash = req.body && req.body.escrowTxHash;
+      if (!seq) return res.status(400).json({ error: 'escrow_sequence missing; provide escrowSequence in body to finalize' });
+      await db.query("UPDATE orders SET escrow_sequence = $1, escrow_tx_hash = $2, status = 'in_escrow' WHERE id = $3", [seq, hash || null, o.id]);
+      o.escrow_sequence = seq;
     }
     const payload = await xummService.createEscrowFinishPayload({ buyerAddress: o.buyer_address, escrowOwner: o.buyer_address, offerSequence: o.escrow_sequence });
     res.json({ xumm: payload, orderId: o.id });
