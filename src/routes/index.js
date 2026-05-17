@@ -229,6 +229,22 @@ router.get('/orders/:id/escrow/status', auth, async (req, res) => {
       return res.json({ status: o.status });
     }
     const onChain = await escrowService.getEscrowStatus(o.buyer_address, o.escrow_sequence);
+    if (onChain && onChain.status === 'not_found' && o.status !== 'completed') {
+      try {
+        const xrplClient = require('../xrplClient');
+        const client = await xrplClient.get();
+        const txs = await client.request({ command: 'account_tx', account: o.buyer_address, limit: 30 });
+        for (const t of (txs.result.transactions || [])) {
+          const tx = t.tx;
+          if (!tx || tx.TransactionType !== 'EscrowFinish') continue;
+          if (t.meta && t.meta.TransactionResult !== 'tesSUCCESS') continue;
+          if (tx.OfferSequence !== o.escrow_sequence) continue;
+          await db.query("UPDATE orders SET status = 'completed', finish_tx_hash = $1, completed_at = NOW() WHERE id = $2", [tx.hash, o.id]);
+          await db.query("UPDATE listings SET status = 'sold' WHERE id = $1", [o.listing_id]);
+          return res.json({ status: 'completed', finish_tx_hash: tx.hash, onChain, synced: true });
+        }
+      } catch (syncErr) { /* fallthrough */ }
+    }
     res.json({ status: o.status, onChain });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -598,12 +614,12 @@ router.patch('/offers/:id/accept', auth, async (req, res) => {
           try { await escrowService.releaseEscrow(order); } catch(e) { console.error('Release escrow error:', e.message); }
           await db.query("UPDATE orders SET status='completed', updated_at=NOW() WHERE id=$1", [order.id]);
         } else {
-          // Escrow not locked yet â mark order as accepted, buyer still needs to pay
+          // Escrow not locked yet Ã¢ÂÂ mark order as accepted, buyer still needs to pay
           await db.query("UPDATE orders SET status='awaiting_payment', updated_at=NOW() WHERE id=$1", [order.id]);
         }
       }
     } else {
-      // Old offer without order â create one now so buyer can pay via Xumm
+      // Old offer without order Ã¢ÂÂ create one now so buyer can pay via Xumm
       const br = await db.query('SELECT wallet_address FROM users WHERE id=$1', [offer.buyer_id]);
       const sr = await db.query('SELECT wallet_address FROM users WHERE id=$1', [req.user.id]);
       const lr = await db.query('SELECT * FROM listings WHERE id=$1', [offer.listing_id]);
