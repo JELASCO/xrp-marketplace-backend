@@ -204,10 +204,30 @@ router.post('/orders/:id/escrow/xumm-payload', auth, async (req, res) => {
 
 router.get('/orders/:id/escrow/status', auth, async (req, res) => {
   try {
-    const order = await db.query('SELECT o.*, u.wallet_address as buyer_address FROM orders o JOIN users u ON o.buyer_id = u.id WHERE o.id = $1', [req.params.id]);
+    const order = await db.query('SELECT o.*, u.wallet_address as buyer_address, s.wallet_address as seller_address FROM orders o JOIN users u ON o.buyer_id = u.id JOIN users s ON o.seller_id = s.id WHERE o.id = $1', [req.params.id]);
     if (!order.rows[0]) return res.status(404).json({ error: 'Not found' });
     const o = order.rows[0];
-    if (!o.escrow_sequence) return res.json({ status: o.status });
+    if (!o.escrow_sequence) {
+      try {
+        const xrpl = require('xrpl');
+        const xrplClient = require('../xrplClient');
+        const client = await xrplClient.get();
+        const txs = await client.request({ command: 'account_tx', account: o.buyer_address, limit: 15 });
+        const orderIdHex = Buffer.from(o.id).toString('hex').toUpperCase();
+        for (const t of (txs.result.transactions || [])) {
+          const tx = t.tx;
+          if (!tx || tx.TransactionType !== 'EscrowCreate') continue;
+          if (t.meta && t.meta.TransactionResult !== 'tesSUCCESS') continue;
+          if (tx.Destination !== o.seller_address) continue;
+          const memoMatch = (tx.Memos || []).some(m => m.Memo && m.Memo.MemoData === orderIdHex);
+          if (memoMatch) {
+            await db.query("UPDATE orders SET escrow_sequence = $1, escrow_tx_hash = $2, status = 'escrow_locked' WHERE id = $3", [tx.Sequence, tx.hash, o.id]);
+            return res.json({ status: 'escrow_locked', escrow_sequence: tx.Sequence, escrow_tx_hash: tx.hash, synced: true });
+          }
+        }
+      } catch (syncErr) { /* fallthrough */ }
+      return res.json({ status: o.status });
+    }
     const onChain = await escrowService.getEscrowStatus(o.buyer_address, o.escrow_sequence);
     res.json({ status: o.status, onChain });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -578,12 +598,12 @@ router.patch('/offers/:id/accept', auth, async (req, res) => {
           try { await escrowService.releaseEscrow(order); } catch(e) { console.error('Release escrow error:', e.message); }
           await db.query("UPDATE orders SET status='completed', updated_at=NOW() WHERE id=$1", [order.id]);
         } else {
-          // Escrow not locked yet — mark order as accepted, buyer still needs to pay
+          // Escrow not locked yet â mark order as accepted, buyer still needs to pay
           await db.query("UPDATE orders SET status='awaiting_payment', updated_at=NOW() WHERE id=$1", [order.id]);
         }
       }
     } else {
-      // Old offer without order — create one now so buyer can pay via Xumm
+      // Old offer without order â create one now so buyer can pay via Xumm
       const br = await db.query('SELECT wallet_address FROM users WHERE id=$1', [offer.buyer_id]);
       const sr = await db.query('SELECT wallet_address FROM users WHERE id=$1', [req.user.id]);
       const lr = await db.query('SELECT * FROM listings WHERE id=$1', [offer.listing_id]);
