@@ -239,7 +239,7 @@ router.get('/orders/:id/escrow/status', auth, async (req, res) => {
         const list = txs.result.transactions || [];
         _debug.tx_count = list.length;
         for (const t of list) {
-          const tx = t.tx;
+          const tx = t.tx_json || t.tx;
           if (!tx) { _debug.types.push('null'); continue; }
           _debug.types.push(tx.TransactionType);
           if (tx.TransactionType !== 'EscrowFinish') continue;
@@ -621,12 +621,12 @@ router.patch('/offers/:id/accept', auth, async (req, res) => {
           try { await escrowService.releaseEscrow(order); } catch(e) { console.error('Release escrow error:', e.message); }
           await db.query("UPDATE orders SET status='completed', updated_at=NOW() WHERE id=$1", [order.id]);
         } else {
-          // Escrow not locked yet ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ mark order as accepted, buyer still needs to pay
+          // Escrow not locked yet ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ mark order as accepted, buyer still needs to pay
           await db.query("UPDATE orders SET status='awaiting_payment', updated_at=NOW() WHERE id=$1", [order.id]);
         }
       }
     } else {
-      // Old offer without order ÃÂÃÂ¢ÃÂÃÂÃÂÃÂ create one now so buyer can pay via Xumm
+      // Old offer without order ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ create one now so buyer can pay via Xumm
       const br = await db.query('SELECT wallet_address FROM users WHERE id=$1', [offer.buyer_id]);
       const sr = await db.query('SELECT wallet_address FROM users WHERE id=$1', [req.user.id]);
       const lr = await db.query('SELECT * FROM listings WHERE id=$1', [offer.listing_id]);
