@@ -229,23 +229,30 @@ router.get('/orders/:id/escrow/status', auth, async (req, res) => {
       return res.json({ status: o.status });
     }
     const onChain = await escrowService.getEscrowStatus(o.buyer_address, o.escrow_sequence);
+    const _debug = { entered: false, buyer_address: o.buyer_address, escrow_sequence: o.escrow_sequence, escrow_sequence_type: typeof o.escrow_sequence, tx_count: 0, types: [], finishes: [], syncErr: null };
     if (onChain && onChain.status === 'not_found' && o.status !== 'completed') {
+      _debug.entered = true;
       try {
         const xrplClient = require('../xrplClient');
         const client = await xrplClient.get();
         const txs = await client.request({ command: 'account_tx', account: o.buyer_address, limit: 30 });
-        for (const t of (txs.result.transactions || [])) {
+        const list = txs.result.transactions || [];
+        _debug.tx_count = list.length;
+        for (const t of list) {
           const tx = t.tx;
-          if (!tx || tx.TransactionType !== 'EscrowFinish') continue;
+          if (!tx) { _debug.types.push('null'); continue; }
+          _debug.types.push(tx.TransactionType);
+          if (tx.TransactionType !== 'EscrowFinish') continue;
+          _debug.finishes.push({ OfferSequence: tx.OfferSequence, OfferSequence_type: typeof tx.OfferSequence, Owner: tx.Owner, Account: tx.Account, result: t.meta && t.meta.TransactionResult, hash: tx.hash });
           if (t.meta && t.meta.TransactionResult !== 'tesSUCCESS') continue;
           if (Number(tx.OfferSequence) !== Number(o.escrow_sequence)) continue;
           await db.query("UPDATE orders SET status = 'completed', finish_tx_hash = $1, completed_at = NOW() WHERE id = $2", [tx.hash, o.id]);
           await db.query("UPDATE listings SET status = 'sold' WHERE id = $1", [o.listing_id]);
-          return res.json({ status: 'completed', finish_tx_hash: tx.hash, onChain, synced: true });
+          return res.json({ status: 'completed', finish_tx_hash: tx.hash, onChain, synced: true, _debug });
         }
-      } catch (syncErr) { /* fallthrough */ }
+      } catch (syncErr) { _debug.syncErr = syncErr.message; }
     }
-    res.json({ status: o.status, onChain });
+    res.json({ status: o.status, onChain, _debug });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
